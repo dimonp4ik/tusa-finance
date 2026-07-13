@@ -129,12 +129,6 @@ def run_momentum_scan():
     _log.info("=== momentum scan end ===")
 
 
-def run_scan():
-    """Full manual refresh — both cycles back to back (admin button)."""
-    run_dividend_scan()
-    run_momentum_scan()
-
-
 def start_bot():
     global _scheduler
     _log.info("Starting Tusa Finance Bot...")

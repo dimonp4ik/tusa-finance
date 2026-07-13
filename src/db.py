@@ -63,6 +63,15 @@ def init_db():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS admins (
+                user_id    INTEGER PRIMARY KEY,
+                username   TEXT,
+                first_name TEXT,
+                added_by   INTEGER,
+                added_at   REAL NOT NULL
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS bot_state (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -138,6 +147,27 @@ def get_latest_unusual_volume_candidates(limit: int = 10) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_scan_summary() -> dict:
+    """Last-scan timestamp + candidate count per screener — for the admin status view."""
+    tables = {
+        "dividend": "dividend_candidates",
+        "momentum": "momentum_candidates",
+        "unusual_volume": "unusual_volume_candidates",
+    }
+    out = {}
+    with _conn() as c:
+        for key, table in tables.items():
+            row = c.execute(f"SELECT MAX(scanned_at) AS t FROM {table}").fetchone()
+            last_at = row["t"] if row else None
+            count = 0
+            if last_at is not None:
+                count = c.execute(
+                    f"SELECT COUNT(*) AS n FROM {table} WHERE scanned_at=?", (last_at,)
+                ).fetchone()["n"]
+            out[key] = {"last_at": last_at, "count": count}
+    return out
+
+
 def get_last_scan_at() -> float | None:
     with _conn() as c:
         vals = []
@@ -146,6 +176,34 @@ def get_last_scan_at() -> float | None:
             if row and row["t"] is not None:
                 vals.append(row["t"])
         return max(vals) if vals else None
+
+
+def add_dynamic_admin(user_id: int, username: str = None,
+                      first_name: str = None, added_by: int = None) -> None:
+    with _conn() as c:
+        c.execute("""
+            INSERT INTO admins (user_id, username, first_name, added_by, added_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username   = COALESCE(excluded.username,   username),
+                first_name = COALESCE(excluded.first_name, first_name)
+        """, (user_id, username, first_name, added_by, time.time()))
+
+
+def remove_dynamic_admin(user_id: int) -> None:
+    with _conn() as c:
+        c.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+
+
+def get_dynamic_admins() -> list[dict]:
+    with _conn() as c:
+        rows = c.execute("SELECT * FROM admins ORDER BY added_at ASC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def is_dynamic_admin(user_id: int) -> bool:
+    with _conn() as c:
+        return c.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,)).fetchone() is not None
 
 
 def was_recently_sent(symbol: str, kind: str, within_days: int = 7) -> bool:
