@@ -20,7 +20,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import SCAN_HOUR_UTC
+from config import SCAN_HOUR_UTC, CRYPTO_MOMENTUM_UNIVERSE_SIZE
 from src import db
 from src import universe_stocks, universe_crypto
 from src import dividend_screener, momentum_screener
@@ -42,12 +42,15 @@ def run_scan():
     _log.info("=== daily scan start ===")
     try:
         stock_universe = universe_stocks.get_stock_universe()
-        crypto_universe = universe_crypto.get_crypto_universe()
-        _log.info("universe: %d stocks, %d crypto pairs", len(stock_universe), len(crypto_universe))
+        # Momentum-chasing alts loses money (backtested) — restrict crypto
+        # momentum to the top-N most liquid pairs by live 24h volume.
+        crypto_momentum_universe = universe_crypto.get_top_crypto_by_volume(CRYPTO_MOMENTUM_UNIVERSE_SIZE)
+        _log.info("universe: %d stocks, %d crypto pairs (top by volume)",
+                   len(stock_universe), len(crypto_momentum_universe))
 
         dividend_hits = dividend_screener.screen(stock_universe)
         momentum_stock_hits = momentum_screener.screen_stocks(stock_universe)
-        momentum_crypto_hits = momentum_screener.screen_crypto(crypto_universe)
+        momentum_crypto_hits = momentum_screener.screen_crypto(crypto_momentum_universe)
         momentum_hits = momentum_stock_hits + momentum_crypto_hits
 
         if dividend_hits:

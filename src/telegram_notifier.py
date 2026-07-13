@@ -75,5 +75,14 @@ def send_digest(dividend_rows: list[dict], momentum_rows: list[dict]) -> None:
         send_message("💰 <b>ДИВИДЕНДНЫЕ КАНДИДАТЫ</b>\n\n" + "\n\n".join(blocks))
 
     if momentum_rows:
+        has_crypto = any(r["asset_type"] == "crypto" for r in momentum_rows)
+        header = "🚀 <b>МОМЕНТУМ / КАНДИДАТЫ НА ИКС</b>"
+        if has_crypto:
+            # Backtest (backtest_momentum.py): stock momentum has a clear
+            # positive edge (+3pp vs baseline); crypto momentum edge is near
+            # zero/negative even restricted to top-volume pairs — hype coins
+            # (WLD/NEAR/PEPE-type) drag it down. Flag until enough live
+            # momentum_candidates history accumulates to recalibrate.
+            header += "\n⚠️ Крипто-часть — экспериментально, бектест edge под вопросом"
         blocks = [format_momentum_candidate(r) for r in momentum_rows]
-        send_message("🚀 <b>МОМЕНТУМ / КАНДИДАТЫ НА ИКС</b>\n\n" + "\n\n".join(blocks))
+        send_message(header + "\n\n" + "\n\n".join(blocks))

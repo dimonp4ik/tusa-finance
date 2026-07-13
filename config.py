@@ -57,6 +57,15 @@ MOM_RSI_MIN = float(os.getenv("MOM_RSI_MIN", "55"))
 MOM_RSI_MAX = float(os.getenv("MOM_RSI_MAX", "80"))     # avoid buying blown-off tops
 MOM_TOP_N = int(os.getenv("MOM_TOP_N", "10"))
 
+# ── Crypto momentum universe ─────────────────────────────────────────────────
+# Backtest (backtest_momentum.py) showed momentum-chasing (+15%/4wk, RSI 55-80)
+# has a positive edge on liquid majors (BTC/ETH/XRP/DOGE-type) but a NEGATIVE
+# edge on illiquid alts (pump-and-dump, catches tops not continuations).
+# Restrict the crypto momentum screener to the top-N most liquid pairs by live
+# 24h volume — an objective, self-updating "majors" filter (see
+# src/universe_crypto.get_top_crypto_by_volume).
+CRYPTO_MOMENTUM_UNIVERSE_SIZE = int(os.getenv("CRYPTO_MOMENTUM_UNIVERSE_SIZE", "20"))
+
 # ── Crypto leverage (X-Perp, decided per-candidate, never forced) ───────────
 CRYPTO_LEVERAGE_MIN = int(os.getenv("CRYPTO_LEVERAGE_MIN", "2"))
 CRYPTO_LEVERAGE_MAX = int(os.getenv("CRYPTO_LEVERAGE_MAX", "5"))
