@@ -100,6 +100,54 @@ def save_unusual_volume_candidates(rows: list[dict]) -> None:
         """, [{**r, "scanned_at": now} for r in rows])
 
 
+def get_latest_dividend_candidates(limit: int = 10) -> list[dict]:
+    """Most recent scan batch (not just top-N ever) — for the on-demand
+    Telegram button, so it shows what the last scheduled scan actually found."""
+    with _conn() as c:
+        latest = c.execute("SELECT MAX(scanned_at) AS t FROM dividend_candidates").fetchone()
+        if not latest or latest["t"] is None:
+            return []
+        rows = c.execute(
+            "SELECT * FROM dividend_candidates WHERE scanned_at=? ORDER BY score DESC LIMIT ?",
+            (latest["t"], limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_latest_momentum_candidates(limit: int = 10) -> list[dict]:
+    with _conn() as c:
+        latest = c.execute("SELECT MAX(scanned_at) AS t FROM momentum_candidates").fetchone()
+        if not latest or latest["t"] is None:
+            return []
+        rows = c.execute(
+            "SELECT * FROM momentum_candidates WHERE scanned_at=? ORDER BY score DESC LIMIT ?",
+            (latest["t"], limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_latest_unusual_volume_candidates(limit: int = 10) -> list[dict]:
+    with _conn() as c:
+        latest = c.execute("SELECT MAX(scanned_at) AS t FROM unusual_volume_candidates").fetchone()
+        if not latest or latest["t"] is None:
+            return []
+        rows = c.execute(
+            "SELECT * FROM unusual_volume_candidates WHERE scanned_at=? ORDER BY score DESC LIMIT ?",
+            (latest["t"], limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_last_scan_at() -> float | None:
+    with _conn() as c:
+        vals = []
+        for table in ("dividend_candidates", "momentum_candidates", "unusual_volume_candidates"):
+            row = c.execute(f"SELECT MAX(scanned_at) AS t FROM {table}").fetchone()
+            if row and row["t"] is not None:
+                vals.append(row["t"])
+        return max(vals) if vals else None
+
+
 def was_recently_sent(symbol: str, kind: str, within_days: int = 7) -> bool:
     cutoff = time.time() - within_days * 86400
     with _conn() as c:

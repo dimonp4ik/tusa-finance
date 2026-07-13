@@ -27,6 +27,7 @@ from src import universe_stocks, universe_crypto
 from src import dividend_screener, momentum_screener
 from src import insider_buying
 from src import telegram_notifier
+from src import telegram_bot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 _log = logging.getLogger(__name__)
@@ -138,6 +139,8 @@ def start_bot():
     _scheduler.add_job(run_scan, CronTrigger(hour=SCAN_HOUR_UTC, minute=0))
     _scheduler.start()
     _log.info("scheduler started — daily scan at %02d:00 UTC", SCAN_HOUR_UTC)
+
+    telegram_bot.start_polling()
 
 
 start_bot()
