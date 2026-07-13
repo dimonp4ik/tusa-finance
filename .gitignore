@@ -22,3 +22,6 @@ Thumbs.db
 
 # Database
 *.db
+
+# Backtest data cache (local pickles)
+backtest_cache/
