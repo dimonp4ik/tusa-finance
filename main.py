@@ -14,6 +14,7 @@ X-Perp per-candidate) execution come in a later phase.
 import logging
 import sys
 import os
+import time
 
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -112,9 +113,27 @@ def run_scan():
 
 def start_bot():
     global _scheduler
+    _log.info("Starting Tusa Finance Bot...")
     db.init_db()
     if _scheduler is not None:
         return
+
+    # Dedup guard: only send once per 60s per container (prevents double
+    # message during Railway zero-downtime deploys where old + new
+    # instances briefly overlap) — same pattern as the other tusa bots.
+    _flag = "/tmp/tusa_finance_started"
+    try:
+        skip = os.path.exists(_flag) and time.time() - os.path.getmtime(_flag) < 60
+        if not skip:
+            open(_flag, "w").close()
+            telegram_notifier.send_message(
+                "🤖 <b>Tusa Finance Bot Online</b>\n"
+                f"Скан рынка раз в сутки, {SCAN_HOUR_UTC:02d}:00 UTC — дивиденды, моментум, "
+                "аномальный объём, инсайдерские покупки."
+            )
+    except Exception as e:
+        _log.warning("Could not send startup message: %s", e)
+
     _scheduler = BackgroundScheduler(timezone="UTC")
     _scheduler.add_job(run_scan, CronTrigger(hour=SCAN_HOUR_UTC, minute=0))
     _scheduler.start()
