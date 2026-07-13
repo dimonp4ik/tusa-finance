@@ -63,7 +63,7 @@ def init_db():
             )
         """)
         c.execute("""
-            CREATE TABLE IF NOT EXISTS deepseek_verdicts (
+            CREATE TABLE IF NOT EXISTS judge_verdicts (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol   TEXT NOT NULL,
                 kind     TEXT NOT NULL,   -- 'momentum' | 'dividend' | 'unusual_volume'
@@ -188,14 +188,14 @@ def get_last_scan_at() -> float | None:
         return max(vals) if vals else None
 
 
-def save_deepseek_verdicts(kind: str, verdicts: dict) -> None:
+def save_judge_verdicts(kind: str, verdicts: dict) -> None:
     """verdicts: symbol -> {'verdict', 'reason'} — logged so the judge's hit
     rate can be checked against real outcomes later, same way the crypto
     bot's Claude calibration was validated before it earned any trust."""
     now = time.time()
     with _conn() as c:
         c.executemany(
-            "INSERT INTO deepseek_verdicts (symbol, kind, verdict, reason, ts) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO judge_verdicts (symbol, kind, verdict, reason, ts) VALUES (?, ?, ?, ?, ?)",
             [(sym, kind, v.get("verdict", "?"), v.get("reason", ""), now) for sym, v in verdicts.items()],
         )
 

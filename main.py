@@ -29,7 +29,7 @@ from src import db
 from src import universe_stocks, universe_crypto
 from src import dividend_screener, momentum_screener
 from src import insider_buying
-from src import market_context, deepseek_judge
+from src import market_context, ai_judge
 from src import telegram_notifier
 from src import telegram_bot
 
@@ -59,18 +59,20 @@ def _enrich_insider(rows: list[dict]) -> None:
             r["insider_purchases"] = []
 
 
-def _enrich_deepseek(rows: list[dict], kind: str) -> None:
-    """Optional second opinion (only when DEEPSEEK_API_KEY is set) — attaches
-    row['deepseek'] in place and logs verdicts for later hit-rate analysis."""
-    if not deepseek_judge.is_enabled() or not rows:
+def _enrich_judge(rows: list[dict], kind: str) -> None:
+    """Optional AI second opinion (Claude if CLAUDE_API_KEY is set, DeepSeek
+    as fallback) — attaches row['judge'] in place and logs verdicts for
+    later hit-rate analysis."""
+    if not ai_judge.is_enabled() or not rows:
         return
-    verdicts = deepseek_judge.judge_candidates(rows)
+    verdicts = ai_judge.judge_candidates(rows)
     if not verdicts:
         return
-    db.save_deepseek_verdicts(kind, verdicts)
+    db.save_judge_verdicts(kind, verdicts)
+    provider = ai_judge.provider_name()
     for r in rows:
         if r["symbol"] in verdicts:
-            r["deepseek"] = verdicts[r["symbol"]]
+            r["judge"] = {**verdicts[r["symbol"]], "provider": provider}
 
 
 def run_dividend_scan():
@@ -83,7 +85,7 @@ def run_dividend_scan():
 
         new_dividend = [r for r in dividend_hits if not db.was_recently_sent(r["symbol"], "dividend")]
         _enrich_insider(new_dividend)
-        _enrich_deepseek(new_dividend, "dividend")
+        _enrich_judge(new_dividend, "dividend")
         telegram_notifier.send_digest(new_dividend, [], [])
         for r in new_dividend:
             db.mark_sent(r["symbol"], "dividend")
@@ -142,8 +144,8 @@ def run_momentum_scan():
         # SEC lookups only on what's actually about to be sent.
         _enrich_insider(new_momentum)
         _enrich_insider(new_unusual)
-        _enrich_deepseek(new_momentum, "momentum")
-        _enrich_deepseek(new_unusual, "unusual_volume")
+        _enrich_judge(new_momentum, "momentum")
+        _enrich_judge(new_unusual, "unusual_volume")
 
         # Market-context header: SPY regime + crypto Fear & Greed (both free).
         context_lines = market_context.context_header_lines()

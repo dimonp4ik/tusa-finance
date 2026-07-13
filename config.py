@@ -116,10 +116,15 @@ FNG_EXTREME_FEAR = int(os.getenv("FNG_EXTREME_FEAR", "25"))
 # leverage suggestion gets downgraded to spot-only on that candidate.
 FUNDING_RATE_WARN = float(os.getenv("FUNDING_RATE_WARN", "0.0005"))  # 0.05%/8h
 
-# ── DeepSeek verifier (optional, ~free: 5M tokens on signup, then ~$0.14/M) ─
-# When DEEPSEEK_API_KEY is set, the final digest candidates get one extra
-# sanity-check pass by DeepSeek (BUY/SKIP + reason, appended to the message).
-# Unset key → step skipped entirely, bot works exactly as before.
+# ── AI verifier (optional second opinion on digest candidates) ──────────────
+# Preferred: Claude (user already has a key from the other tusa bots —
+# CLAUDE_API_KEY, same env name as the crypto bot). Haiku 4.5 by default:
+# the judge task is simple (5 candidates → BUY/SKIP + short reason) and
+# Haiku costs ~$0.5/mo on this load; set JUDGE_MODEL=claude-sonnet-5 for a
+# smarter judge at ~$1.5/mo. DeepSeek stays as the fallback provider.
+# No key set at all → step skipped entirely, bot works exactly as before.
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-haiku-4-5")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")

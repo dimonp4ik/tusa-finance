@@ -36,14 +36,15 @@ def send_message(text: str, chat_id: str = None) -> bool:
         return False
 
 
-def _deepseek_tag(row: dict) -> str:
-    """Second-opinion line — main.py attaches row['deepseek'] when the
-    optional DeepSeek judge is enabled (DEEPSEEK_API_KEY set)."""
-    ds = row.get("deepseek")
-    if not ds:
+def _judge_tag(row: dict) -> str:
+    """Second-opinion line — main.py attaches row['judge'] when the optional
+    AI judge is enabled (CLAUDE_API_KEY or DEEPSEEK_API_KEY set)."""
+    j = row.get("judge")
+    if not j:
         return ""
-    icon = "✅" if ds.get("verdict") == "BUY" else "⛔"
-    return f"\n🤖 DeepSeek: {icon} {ds.get('verdict', '?')} — {ds.get('reason', '')}"
+    icon = "✅" if j.get("verdict") == "BUY" else "⛔"
+    provider = j.get("provider") or "AI"
+    return f"\n🤖 {provider}: {icon} {j.get('verdict', '?')} — {j.get('reason', '')}"
 
 
 def _insider_tag(row: dict) -> str:
@@ -66,7 +67,7 @@ def format_dividend_candidate(row: dict) -> str:
         f"Платит дивиденды: {row['years_history']}+ лет\n"
         f"Score: {row['score']:.0f}/100"
         f"{_insider_tag(row)}"
-        f"{_deepseek_tag(row)}"
+        f"{_judge_tag(row)}"
     )
 
 
@@ -91,7 +92,7 @@ def format_momentum_candidate(row: dict) -> str:
         f"RSI: {row['rsi']:.0f}\n"
         f"Score: {row['score']:.0f}/100{lev_note}"
         f"{_insider_tag(row)}"
-        f"{_deepseek_tag(row)}"
+        f"{_judge_tag(row)}"
     )
 
 
@@ -103,7 +104,7 @@ def format_unusual_volume_candidate(row: dict) -> str:
         + (f"RSI: {row['rsi']:.0f}\n" if row.get("rsi") is not None else "")
         + f"Score: {row['score']:.0f}/100"
         f"{_insider_tag(row)}"
-        f"{_deepseek_tag(row)}"
+        f"{_judge_tag(row)}"
     )
 
 
