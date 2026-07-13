@@ -57,14 +57,34 @@ MOM_RSI_MIN = float(os.getenv("MOM_RSI_MIN", "55"))
 MOM_RSI_MAX = float(os.getenv("MOM_RSI_MAX", "80"))     # avoid buying blown-off tops
 MOM_TOP_N = int(os.getenv("MOM_TOP_N", "10"))
 
+# ── Unusual volume screener (stocks) ────────────────────────────────────────
+# Catches a move on DAY 1 (volume spike + starting to react), unlike the
+# momentum screener above which requires the +15%/4wk move to have already
+# happened. Free source: same bulk OHLCV pull momentum already does — no
+# extra API calls, no finviz/paid screener needed.
+UNUSUAL_VOLUME_MULT = float(os.getenv("UNUSUAL_VOLUME_MULT", "3.0"))            # today's $vol vs 20d avg
+UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT = float(os.getenv("UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT", "3.0"))
+UNUSUAL_VOLUME_TOP_N = int(os.getenv("UNUSUAL_VOLUME_TOP_N", "10"))
+
+# ── Insider buying enrichment (stocks only — SEC EDGAR, free, no key) ───────
+# Applied to already-shortlisted candidates (dividend/momentum/unusual-volume
+# top-N), not the full universe — SEC per-filing lookups are one HTTP call
+# each, and there's no point scanning 12000 tickers we're not going to alert.
+INSIDER_LOOKBACK_DAYS = int(os.getenv("INSIDER_LOOKBACK_DAYS", "30"))
+INSIDER_MIN_VALUE_USD = float(os.getenv("INSIDER_MIN_VALUE_USD", "25000"))
+# SEC requires a descriptive User-Agent identifying the requester (no key needed).
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "TusaFinance/1.0 (contact: dimapetrov.2006.12@gmail.com)")
+
 # ── Crypto momentum universe ─────────────────────────────────────────────────
 # Backtest (backtest_momentum.py) showed momentum-chasing (+15%/4wk, RSI 55-80)
 # has a positive edge on liquid majors (BTC/ETH/XRP/DOGE-type) but a NEGATIVE
-# edge on illiquid alts (pump-and-dump, catches tops not continuations).
-# Restrict the crypto momentum screener to the top-N most liquid pairs by live
-# 24h volume — an objective, self-updating "majors" filter (see
-# src/universe_crypto.get_top_crypto_by_volume).
-CRYPTO_MOMENTUM_UNIVERSE_SIZE = int(os.getenv("CRYPTO_MOMENTUM_UNIVERSE_SIZE", "20"))
+# edge on illiquid alts on average (pump-and-dump, catches tops not
+# continuations). User wants the full OKX EU universe scanned anyway — a real
+# few-day 2-5x small-cap pump is exactly the outlier a "top liquid pairs
+# only" filter would hide; this is a small-size lottery-ticket bet, not an
+# expectancy play. Low-liquidity hits get tagged in Telegram so sizing stays
+# small on the risky ones (see telegram_notifier.format_momentum_candidate).
+CRYPTO_LOW_LIQUIDITY_USD = float(os.getenv("CRYPTO_LOW_LIQUIDITY_USD", "5000000"))  # $5M/day
 
 # ── Crypto leverage (X-Perp, decided per-candidate, never forced) ───────────
 CRYPTO_LEVERAGE_MIN = int(os.getenv("CRYPTO_LEVERAGE_MIN", "2"))

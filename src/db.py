@@ -43,6 +43,18 @@ def init_db():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS unusual_volume_candidates (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol            TEXT NOT NULL,
+                price_change_pct  REAL,
+                volume_usd        REAL,
+                relative_volume   REAL,
+                rsi               REAL,
+                score             REAL,
+                scanned_at        REAL NOT NULL
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS sent_alerts (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol     TEXT NOT NULL,
@@ -75,6 +87,16 @@ def save_momentum_candidates(rows: list[dict]) -> None:
             INSERT INTO momentum_candidates
                 (symbol, asset_type, price_change_pct, volume_usd, rsi, score, suggest_leverage, scanned_at)
             VALUES (:symbol, :asset_type, :price_change_pct, :volume_usd, :rsi, :score, :suggest_leverage, :scanned_at)
+        """, [{**r, "scanned_at": now} for r in rows])
+
+
+def save_unusual_volume_candidates(rows: list[dict]) -> None:
+    now = time.time()
+    with _conn() as c:
+        c.executemany("""
+            INSERT INTO unusual_volume_candidates
+                (symbol, price_change_pct, volume_usd, relative_volume, rsi, score, scanned_at)
+            VALUES (:symbol, :price_change_pct, :volume_usd, :relative_volume, :rsi, :score, :scanned_at)
         """, [{**r, "scanned_at": now} for r in rows])
 
 

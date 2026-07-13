@@ -12,10 +12,13 @@ import logging
 import sys
 import os
 
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     MOM_LOOKBACK_WEEKS, MOM_MIN_PRICE_CHANGE_PCT, MOM_MIN_VOLUME_USD,
     MOM_RSI_MIN, MOM_RSI_MAX, MOM_TOP_N, CRYPTO_LEVERAGE_SCORE_THRESHOLD,
+    UNUSUAL_VOLUME_MULT, UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT, UNUSUAL_VOLUME_TOP_N,
 )
 from src import market_data, okx_public, indicators
 
@@ -30,9 +33,16 @@ def _score(price_change_pct: float, volume_usd: float) -> float:
     return round(min(100, price_change_pct * 0.8 + vol_component * 0.2), 1)
 
 
-def screen_stocks(universe: list[str]) -> list[dict]:
+def fetch_stock_history(universe: list[str]) -> dict:
+    """Shared bulk OHLCV pull — call once, pass to screen_stocks AND
+    screen_unusual_volume so they don't each re-download the same data."""
     _log.info("momentum screener: pulling price history for %d stock symbols", len(universe))
-    history = market_data.get_stock_price_history(universe, period="3mo", interval="1d")
+    return market_data.get_stock_price_history(universe, period="3mo", interval="1d")
+
+
+def screen_stocks(universe: list[str], history: dict = None) -> list[dict]:
+    if history is None:
+        history = fetch_stock_history(universe)
 
     candidates = []
     for symbol, df in history.items():
@@ -64,6 +74,46 @@ def screen_stocks(universe: list[str]) -> list[dict]:
 
     candidates.sort(key=lambda r: r["score"], reverse=True)
     return candidates[:MOM_TOP_N]
+
+
+def screen_unusual_volume(universe: list[str], history: dict = None) -> list[dict]:
+    """Catches a move on DAY 1 — today's $ volume spiking vs its own trailing
+    average, with the price starting to react. Unlike screen_stocks (which
+    requires the +15%/4wk move to have ALREADY happened), this flags moves
+    still in progress: 'кто-то жёстко закупился' right now."""
+    if history is None:
+        history = fetch_stock_history(universe)
+
+    candidates = []
+    for symbol, df in history.items():
+        if len(df) < 21:
+            continue
+        dollar_vol = df["Close"] * df["Volume"]
+        today_vol = float(dollar_vol.iloc[-1])
+        avg_vol_20d = float(dollar_vol.iloc[-21:-1].mean())
+        if avg_vol_20d <= 0:
+            continue
+        relative_volume = today_vol / avg_vol_20d
+        if relative_volume < UNUSUAL_VOLUME_MULT:
+            continue
+
+        price_change_pct = float((df["Close"].iloc[-1] - df["Close"].iloc[-2]) / df["Close"].iloc[-2] * 100)
+        if price_change_pct < UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT:
+            continue
+
+        rsi_val = float(indicators.rsi(df["Close"]).iloc[-1])
+        candidates.append({
+            "symbol": symbol,
+            "asset_type": "stock",
+            "price_change_pct": round(price_change_pct, 1),
+            "volume_usd": round(today_vol, 0),
+            "relative_volume": round(relative_volume, 1),
+            "rsi": round(rsi_val, 1) if pd.notna(rsi_val) else None,
+            "score": round(min(100, relative_volume * 10), 1),
+        })
+
+    candidates.sort(key=lambda r: r["relative_volume"], reverse=True)
+    return candidates[:UNUSUAL_VOLUME_TOP_N]
 
 
 def screen_crypto(inst_ids: list[str]) -> list[dict]:
