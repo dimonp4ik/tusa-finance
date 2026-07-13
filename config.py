@@ -22,11 +22,16 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 DB_PATH = os.getenv("DB_PATH", "tusa_finance.db")
 
 # ── Scan cadence ─────────────────────────────────────────────────────────────
-# Weeks-long holding period → daily scan is plenty. Keep it cheap: yfinance
-# and the exchange-listing files are free but rate/IP limited, so we don't
-# hammer them more than once a day.
+# Dividend fundamentals don't change intraday — daily is plenty, and .info is
+# a slow one-request-per-symbol call (see DIV_SCAN_BATCH_PER_DAY) so there's
+# no upside to running it more often.
 SCAN_HOUR_UTC = int(os.getenv("SCAN_HOUR_UTC", "7"))          # once/day
 DIGEST_HOUR_UTC = int(os.getenv("DIGEST_HOUR_UTC", "18"))     # evening recap
+# Momentum + unusual-volume DO benefit from freshness (unusual-volume exists
+# specifically to catch a move the same day it starts) — these rescan every
+# N hours instead of once/day. Bulk OHLCV pull only (no .info), so the extra
+# runs are cheap-ish; still free/unofficial yfinance, so not sub-hourly.
+MOMENTUM_SCAN_INTERVAL_HOURS = int(os.getenv("MOMENTUM_SCAN_INTERVAL_HOURS", "4"))
 
 # ── Universe sources (all free, no API key) ─────────────────────────────────
 # NASDAQ Trader symbol directory — official, free, no auth. Covers the full
@@ -98,5 +103,9 @@ CRYPTO_LEVERAGE_SCORE_THRESHOLD = float(os.getenv("CRYPTO_LEVERAGE_SCORE_THRESHO
 YFINANCE_BATCH_SIZE = int(os.getenv("YFINANCE_BATCH_SIZE", "50"))
 YFINANCE_SLEEP_SEC = float(os.getenv("YFINANCE_SLEEP_SEC", "0.5"))
 
-# ── Admin (for future Telegram commands) ────────────────────────────────────
-ADMIN_USER_IDS = {int(x) for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip().isdigit()}
+# ── Admin ────────────────────────────────────────────────────────────────────
+# Super-admin hardcoded here, same pattern as the other tusa bots — not env-var
+# driven (others get added via the bot itself once that exists).
+ADMIN_USER_IDS = {671071896} | {
+    int(x) for x in os.getenv("ADMIN_USER_IDS", "").split(",") if x.strip().isdigit()
+}

@@ -1,12 +1,14 @@
 """
 Tusa Finance — signal-only investing bot (weeks horizon).
 
-Daily cycle:
-  1. Pull full universes (US stocks via NASDAQ Trader listing, crypto via
-     OKX EU public instruments — both free, no API key).
-  2. Dividend screener (rotating daily slice, pure fundamentals) +
-     momentum screener (full universe, pure price/volume/RSI).
-  3. Skip anything alerted in the last 7 days, send the rest to Telegram.
+Two independent scan cycles:
+  1. Dividend screener — once/day (SCAN_HOUR_UTC). Fundamentals don't move
+     intraday, and .info is a slow one-request-per-symbol call, so there's
+     no upside to running it more often (see DIV_SCAN_BATCH_PER_DAY).
+  2. Momentum + unusual-volume screener — every MOMENTUM_SCAN_INTERVAL_HOURS.
+     Unusual-volume specifically exists to catch a move the same day it
+     starts, so it benefits from freshness; momentum rides along since it
+     shares the same bulk OHLCV pull.
 
 No autotrading yet — Trading212 (stocks) and OKX (crypto, spot or 2-5x
 X-Perp per-candidate) execution come in a later phase.
@@ -19,9 +21,10 @@ import time
 from flask import Flask
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import SCAN_HOUR_UTC
+from config import SCAN_HOUR_UTC, MOMENTUM_SCAN_INTERVAL_HOURS
 from src import db
 from src import universe_stocks, universe_crypto
 from src import dividend_screener, momentum_screener
@@ -55,8 +58,29 @@ def _enrich_insider(rows: list[dict]) -> None:
             r["insider_purchases"] = []
 
 
-def run_scan():
-    _log.info("=== daily scan start ===")
+def run_dividend_scan():
+    _log.info("=== dividend scan start ===")
+    try:
+        stock_universe = universe_stocks.get_stock_universe()
+        dividend_hits = dividend_screener.screen(stock_universe)
+        if dividend_hits:
+            db.save_dividend_candidates(dividend_hits)
+
+        new_dividend = [r for r in dividend_hits if not db.was_recently_sent(r["symbol"], "dividend")]
+        _enrich_insider(new_dividend)
+        telegram_notifier.send_digest(new_dividend, [], [])
+        for r in new_dividend:
+            db.mark_sent(r["symbol"], "dividend")
+
+        _log.info("dividend scan done: %d new alerts sent", len(new_dividend))
+    except Exception as e:
+        _log.exception("dividend scan failed: %s", e)
+        telegram_notifier.send_message(f"⚠️ Дивидендный скан упал с ошибкой: {e}")
+    _log.info("=== dividend scan end ===")
+
+
+def run_momentum_scan():
+    _log.info("=== momentum scan start ===")
     try:
         stock_universe = universe_stocks.get_stock_universe()
         # Full OKX EU universe, not just top-by-volume: backtest showed
@@ -73,43 +97,42 @@ def run_scan():
         # both read off it instead of each re-downloading the same data.
         stock_history = momentum_screener.fetch_stock_history(stock_universe)
 
-        dividend_hits = dividend_screener.screen(stock_universe)
         momentum_stock_hits = momentum_screener.screen_stocks(stock_universe, history=stock_history)
         momentum_crypto_hits = momentum_screener.screen_crypto(crypto_momentum_universe)
         momentum_hits = momentum_stock_hits + momentum_crypto_hits
         unusual_volume_hits = momentum_screener.screen_unusual_volume(stock_universe, history=stock_history)
 
-        if dividend_hits:
-            db.save_dividend_candidates(dividend_hits)
         if momentum_hits:
             db.save_momentum_candidates(momentum_hits)
         if unusual_volume_hits:
             db.save_unusual_volume_candidates(unusual_volume_hits)
 
-        new_dividend = [r for r in dividend_hits if not db.was_recently_sent(r["symbol"], "dividend")]
         new_momentum = [r for r in momentum_hits if not db.was_recently_sent(r["symbol"], "momentum")]
         new_unusual = [r for r in unusual_volume_hits if not db.was_recently_sent(r["symbol"], "unusual_volume")]
 
-        # SEC lookups only on what's actually about to be sent (~10-30 tickers/day).
-        _enrich_insider(new_dividend)
+        # SEC lookups only on what's actually about to be sent.
         _enrich_insider(new_momentum)
         _enrich_insider(new_unusual)
 
-        telegram_notifier.send_digest(new_dividend, new_momentum, new_unusual)
+        telegram_notifier.send_digest([], new_momentum, new_unusual)
 
-        for r in new_dividend:
-            db.mark_sent(r["symbol"], "dividend")
         for r in new_momentum:
             db.mark_sent(r["symbol"], "momentum")
         for r in new_unusual:
             db.mark_sent(r["symbol"], "unusual_volume")
 
-        _log.info("scan done: %d new dividend, %d new momentum, %d new unusual-volume alerts sent",
-                   len(new_dividend), len(new_momentum), len(new_unusual))
+        _log.info("momentum scan done: %d new momentum, %d new unusual-volume alerts sent",
+                   len(new_momentum), len(new_unusual))
     except Exception as e:
-        _log.exception("scan failed: %s", e)
-        telegram_notifier.send_message(f"⚠️ Скан упал с ошибкой: {e}")
-    _log.info("=== daily scan end ===")
+        _log.exception("momentum scan failed: %s", e)
+        telegram_notifier.send_message(f"⚠️ Моментум-скан упал с ошибкой: {e}")
+    _log.info("=== momentum scan end ===")
+
+
+def run_scan():
+    """Full manual refresh — both cycles back to back (admin button)."""
+    run_dividend_scan()
+    run_momentum_scan()
 
 
 def start_bot():
@@ -129,16 +152,19 @@ def start_bot():
             open(_flag, "w").close()
             telegram_notifier.send_message(
                 "🤖 <b>Tusa Finance Bot Online</b>\n"
-                f"Скан рынка раз в сутки, {SCAN_HOUR_UTC:02d}:00 UTC — дивиденды, моментум, "
-                "аномальный объём, инсайдерские покупки."
+                f"Дивиденды — раз в сутки ({SCAN_HOUR_UTC:02d}:00 UTC). "
+                f"Моментум + аномальный объём — каждые {MOMENTUM_SCAN_INTERVAL_HOURS}ч. "
+                "Инсайдерские покупки — на всех кандидатах."
             )
     except Exception as e:
         _log.warning("Could not send startup message: %s", e)
 
     _scheduler = BackgroundScheduler(timezone="UTC")
-    _scheduler.add_job(run_scan, CronTrigger(hour=SCAN_HOUR_UTC, minute=0))
+    _scheduler.add_job(run_dividend_scan, CronTrigger(hour=SCAN_HOUR_UTC, minute=0))
+    _scheduler.add_job(run_momentum_scan, IntervalTrigger(hours=MOMENTUM_SCAN_INTERVAL_HOURS))
     _scheduler.start()
-    _log.info("scheduler started — daily scan at %02d:00 UTC", SCAN_HOUR_UTC)
+    _log.info("scheduler started — dividends daily at %02d:00 UTC, momentum every %dh",
+               SCAN_HOUR_UTC, MOMENTUM_SCAN_INTERVAL_HOURS)
 
     telegram_bot.start_polling()
 
