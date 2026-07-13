@@ -24,11 +24,12 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from config import SCAN_HOUR_UTC, MOMENTUM_SCAN_INTERVAL_HOURS
+from config import SCAN_HOUR_UTC, MOMENTUM_SCAN_INTERVAL_HOURS, FUNDING_RATE_WARN
 from src import db
 from src import universe_stocks, universe_crypto
 from src import dividend_screener, momentum_screener
 from src import insider_buying
+from src import market_context, deepseek_judge
 from src import telegram_notifier
 from src import telegram_bot
 
@@ -58,6 +59,20 @@ def _enrich_insider(rows: list[dict]) -> None:
             r["insider_purchases"] = []
 
 
+def _enrich_deepseek(rows: list[dict], kind: str) -> None:
+    """Optional second opinion (only when DEEPSEEK_API_KEY is set) — attaches
+    row['deepseek'] in place and logs verdicts for later hit-rate analysis."""
+    if not deepseek_judge.is_enabled() or not rows:
+        return
+    verdicts = deepseek_judge.judge_candidates(rows)
+    if not verdicts:
+        return
+    db.save_deepseek_verdicts(kind, verdicts)
+    for r in rows:
+        if r["symbol"] in verdicts:
+            r["deepseek"] = verdicts[r["symbol"]]
+
+
 def run_dividend_scan():
     _log.info("=== dividend scan start ===")
     try:
@@ -68,6 +83,7 @@ def run_dividend_scan():
 
         new_dividend = [r for r in dividend_hits if not db.was_recently_sent(r["symbol"], "dividend")]
         _enrich_insider(new_dividend)
+        _enrich_deepseek(new_dividend, "dividend")
         telegram_notifier.send_digest(new_dividend, [], [])
         for r in new_dividend:
             db.mark_sent(r["symbol"], "dividend")
@@ -99,11 +115,24 @@ def run_momentum_scan():
 
         momentum_stock_hits = momentum_screener.screen_stocks(stock_universe, history=stock_history)
         momentum_crypto_hits = momentum_screener.screen_crypto(crypto_momentum_universe)
-        momentum_hits = momentum_stock_hits + momentum_crypto_hits
         unusual_volume_hits = momentum_screener.screen_unusual_volume(stock_universe, history=stock_history)
 
+        # One short combined digest (user: too many signals per scan) —
+        # top-5 by score with ≥1 stock and ≥1 crypto guaranteed when both exist.
+        momentum_hits = momentum_screener.select_top_mixed(momentum_stock_hits, momentum_crypto_hits)
+
+        # Crowded-longs check: very positive perp funding on a leveraged
+        # suggestion → downgrade to spot-only (free OKX public endpoint).
+        for r in momentum_hits:
+            if r["asset_type"] == "crypto" and r.get("suggest_leverage"):
+                rate = market_context.get_funding_rate(r["symbol"])
+                if rate is not None and rate > FUNDING_RATE_WARN:
+                    r["suggest_leverage"] = 0
+                    r["funding_hot"] = True
+
         if momentum_hits:
-            db.save_momentum_candidates(momentum_hits)
+            db.save_momentum_candidates(
+                [{k: v for k, v in r.items() if k not in ("funding_hot",)} for r in momentum_hits])
         if unusual_volume_hits:
             db.save_unusual_volume_candidates(unusual_volume_hits)
 
@@ -113,8 +142,13 @@ def run_momentum_scan():
         # SEC lookups only on what's actually about to be sent.
         _enrich_insider(new_momentum)
         _enrich_insider(new_unusual)
+        _enrich_deepseek(new_momentum, "momentum")
+        _enrich_deepseek(new_unusual, "unusual_volume")
 
-        telegram_notifier.send_digest([], new_momentum, new_unusual)
+        # Market-context header: SPY regime + crypto Fear & Greed (both free).
+        context_lines = market_context.context_header_lines()
+
+        telegram_notifier.send_digest([], new_momentum, new_unusual, context_lines=context_lines)
 
         for r in new_momentum:
             db.mark_sent(r["symbol"], "momentum")

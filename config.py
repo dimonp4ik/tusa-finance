@@ -47,7 +47,7 @@ DIV_MIN_YIELD_PCT = float(os.getenv("DIV_MIN_YIELD_PCT", "3.0"))
 DIV_MAX_PAYOUT_RATIO = float(os.getenv("DIV_MAX_PAYOUT_RATIO", "0.80"))   # 80%
 DIV_MIN_MARKET_CAP_USD = float(os.getenv("DIV_MIN_MARKET_CAP_USD", "500000000"))  # $500M
 DIV_MIN_YEARS_HISTORY = int(os.getenv("DIV_MIN_YEARS_HISTORY", "5"))
-DIV_TOP_N = int(os.getenv("DIV_TOP_N", "10"))          # candidates sent per digest
+DIV_TOP_N = int(os.getenv("DIV_TOP_N", "5"))          # candidates sent per digest
 # Fundamentals (.info) is a slow, one-request-per-symbol call — the full
 # US universe is ~8000 tickers. Instead of hammering yfinance daily, scan a
 # rotating slice per day (bot_state remembers the offset) so the whole
@@ -60,7 +60,11 @@ MOM_MIN_PRICE_CHANGE_PCT = float(os.getenv("MOM_MIN_PRICE_CHANGE_PCT", "15.0"))
 MOM_MIN_VOLUME_USD = float(os.getenv("MOM_MIN_VOLUME_USD", "1000000"))   # $1M/day avg
 MOM_RSI_MIN = float(os.getenv("MOM_RSI_MIN", "55"))
 MOM_RSI_MAX = float(os.getenv("MOM_RSI_MAX", "80"))     # avoid buying blown-off tops
+# Per-class shortlist size (stocks and crypto screened separately)…
 MOM_TOP_N = int(os.getenv("MOM_TOP_N", "10"))
+# …then merged into ONE digest of this size, guaranteed ≥1 stock and ≥1
+# crypto when both classes produced hits (user: too many signals per scan).
+MOM_DIGEST_TOP_N = int(os.getenv("MOM_DIGEST_TOP_N", "5"))
 
 # ── Unusual volume screener (stocks) ────────────────────────────────────────
 # Catches a move on DAY 1 (volume spike + starting to react), unlike the
@@ -69,7 +73,7 @@ MOM_TOP_N = int(os.getenv("MOM_TOP_N", "10"))
 # extra API calls, no finviz/paid screener needed.
 UNUSUAL_VOLUME_MULT = float(os.getenv("UNUSUAL_VOLUME_MULT", "3.0"))            # today's $vol vs 20d avg
 UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT = float(os.getenv("UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT", "3.0"))
-UNUSUAL_VOLUME_TOP_N = int(os.getenv("UNUSUAL_VOLUME_TOP_N", "10"))
+UNUSUAL_VOLUME_TOP_N = int(os.getenv("UNUSUAL_VOLUME_TOP_N", "5"))
 
 # ── Insider buying enrichment (stocks only — SEC EDGAR, free, no key) ───────
 # Applied to already-shortlisted candidates (dividend/momentum/unusual-volume
@@ -98,6 +102,27 @@ CRYPTO_LEVERAGE_MAX = int(os.getenv("CRYPTO_LEVERAGE_MAX", "5"))
 # of spot — kept simple and tunable rather than hardcoded logic scattered
 # around the codebase.
 CRYPTO_LEVERAGE_SCORE_THRESHOLD = float(os.getenv("CRYPTO_LEVERAGE_SCORE_THRESHOLD", "70"))
+
+# ── Market context (all free, no keys) ──────────────────────────────────────
+# Regime filter: momentum strategies historically only earn their edge when
+# the broad market is in an uptrend (SPY above its 200-day MA); in downtrends
+# momentum crashes. We tag (not block) signals so the user sees the regime.
+REGIME_MA_DAYS = int(os.getenv("REGIME_MA_DAYS", "200"))
+# Crypto Fear & Greed (alternative.me, free JSON, no key): buying pumps
+# during "Extreme Greed" is where the lottery tickets burn fastest.
+FNG_EXTREME_GREED = int(os.getenv("FNG_EXTREME_GREED", "75"))
+FNG_EXTREME_FEAR = int(os.getenv("FNG_EXTREME_FEAR", "25"))
+# OKX perp funding rate: above this per-8h rate longs are crowded — the
+# leverage suggestion gets downgraded to spot-only on that candidate.
+FUNDING_RATE_WARN = float(os.getenv("FUNDING_RATE_WARN", "0.0005"))  # 0.05%/8h
+
+# ── DeepSeek verifier (optional, ~free: 5M tokens on signup, then ~$0.14/M) ─
+# When DEEPSEEK_API_KEY is set, the final digest candidates get one extra
+# sanity-check pass by DeepSeek (BUY/SKIP + reason, appended to the message).
+# Unset key → step skipped entirely, bot works exactly as before.
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 
 # ── Rate limiting (keep yfinance/free sources from getting us IP-banned) ───
 YFINANCE_BATCH_SIZE = int(os.getenv("YFINANCE_BATCH_SIZE", "50"))

@@ -36,6 +36,16 @@ def send_message(text: str, chat_id: str = None) -> bool:
         return False
 
 
+def _deepseek_tag(row: dict) -> str:
+    """Second-opinion line — main.py attaches row['deepseek'] when the
+    optional DeepSeek judge is enabled (DEEPSEEK_API_KEY set)."""
+    ds = row.get("deepseek")
+    if not ds:
+        return ""
+    icon = "✅" if ds.get("verdict") == "BUY" else "⛔"
+    return f"\n🤖 DeepSeek: {icon} {ds.get('verdict', '?')} — {ds.get('reason', '')}"
+
+
 def _insider_tag(row: dict) -> str:
     """Common enrichment line — main.py attaches row['insider_purchases']
     (SEC EDGAR Form 4 open-market buys) before formatting, US stocks only."""
@@ -56,6 +66,7 @@ def format_dividend_candidate(row: dict) -> str:
         f"Платит дивиденды: {row['years_history']}+ лет\n"
         f"Score: {row['score']:.0f}/100"
         f"{_insider_tag(row)}"
+        f"{_deepseek_tag(row)}"
     )
 
 
@@ -71,6 +82,8 @@ def format_momentum_candidate(row: dict) -> str:
         )
         if row["volume_usd"] < CRYPTO_LOW_LIQUIDITY_USD:
             lev_note += "\n🎰 Низкая ликвидность — лотерейный тикет, размер позиции маленький"
+        if row.get("funding_hot"):
+            lev_note += "\n🌡 Фандинг перегрет — лонги переполнены, вход рискованнее"
     return (
         f"{kind} <b>{row['symbol']}</b>\n"
         f"Рост за {row.get('lookback_weeks', 4)} нед: {row['price_change_pct']:+.1f}%\n"
@@ -78,6 +91,7 @@ def format_momentum_candidate(row: dict) -> str:
         f"RSI: {row['rsi']:.0f}\n"
         f"Score: {row['score']:.0f}/100{lev_note}"
         f"{_insider_tag(row)}"
+        f"{_deepseek_tag(row)}"
     )
 
 
@@ -89,33 +103,37 @@ def format_unusual_volume_candidate(row: dict) -> str:
         + (f"RSI: {row['rsi']:.0f}\n" if row.get("rsi") is not None else "")
         + f"Score: {row['score']:.0f}/100"
         f"{_insider_tag(row)}"
+        f"{_deepseek_tag(row)}"
     )
 
 
 def send_digest(dividend_rows: list[dict], momentum_rows: list[dict],
-                 unusual_volume_rows: list[dict] = None) -> None:
+                 unusual_volume_rows: list[dict] = None,
+                 context_lines: list[str] = None) -> None:
     unusual_volume_rows = unusual_volume_rows or []
     if not dividend_rows and not momentum_rows and not unusual_volume_rows:
         send_message("📭 Сегодня новых кандидатов нет.")
         return
 
+    ctx = ("\n".join(context_lines) + "\n\n") if context_lines else ""
+
     if dividend_rows:
         blocks = [format_dividend_candidate(r) for r in dividend_rows]
-        send_message("💰 <b>ДИВИДЕНДНЫЕ КАНДИДАТЫ</b>\n\n" + "\n\n".join(blocks))
+        send_message("💰 <b>ДИВИДЕНДНЫЕ КАНДИДАТЫ</b>\n" + ctx + "\n\n".join(blocks))
 
     if unusual_volume_rows:
         blocks = [format_unusual_volume_candidate(r) for r in unusual_volume_rows]
-        send_message("🔥 <b>АНОМАЛЬНЫЙ ОБЪЁМ — ДВИЖЕНИЕ НАЧИНАЕТСЯ</b>\n\n" + "\n\n".join(blocks))
+        send_message("🔥 <b>АНОМАЛЬНЫЙ ОБЪЁМ — ДВИЖЕНИЕ НАЧИНАЕТСЯ</b>\n" + ctx + "\n\n".join(blocks))
 
     if momentum_rows:
         has_crypto = any(r["asset_type"] == "crypto" for r in momentum_rows)
-        header = "🚀 <b>МОМЕНТУМ / КАНДИДАТЫ НА ИКС</b>"
+        header = "🚀 <b>МОМЕНТУМ / КАНДИДАТЫ НА ИКС</b>\n"
         if has_crypto:
             # Backtest (backtest_momentum.py): stock momentum has a clear
             # positive edge (+3pp vs baseline); crypto momentum edge is near
             # zero/negative even restricted to top-volume pairs — hype coins
             # (WLD/NEAR/PEPE-type) drag it down. Flag until enough live
             # momentum_candidates history accumulates to recalibrate.
-            header += "\n⚠️ Крипто-часть — экспериментально, бектест edge под вопросом"
+            header += "⚠️ Крипто-часть — экспериментально, бектест edge под вопросом\n"
         blocks = [format_momentum_candidate(r) for r in momentum_rows]
-        send_message(header + "\n\n" + "\n\n".join(blocks))
+        send_message(header + ctx + "\n\n".join(blocks))

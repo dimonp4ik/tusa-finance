@@ -17,7 +17,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
     MOM_LOOKBACK_WEEKS, MOM_MIN_PRICE_CHANGE_PCT, MOM_MIN_VOLUME_USD,
-    MOM_RSI_MIN, MOM_RSI_MAX, MOM_TOP_N, CRYPTO_LEVERAGE_SCORE_THRESHOLD,
+    MOM_RSI_MIN, MOM_RSI_MAX, MOM_TOP_N, MOM_DIGEST_TOP_N,
+    CRYPTO_LEVERAGE_SCORE_THRESHOLD,
     UNUSUAL_VOLUME_MULT, UNUSUAL_VOLUME_MIN_PRICE_CHANGE_PCT, UNUSUAL_VOLUME_TOP_N,
 )
 from src import market_data, okx_public, indicators
@@ -26,6 +27,22 @@ _log = logging.getLogger(__name__)
 
 _LOOKBACK_DAYS = MOM_LOOKBACK_WEEKS * 5   # trading days (stocks)
 _LOOKBACK_DAYS_CRYPTO = MOM_LOOKBACK_WEEKS * 7  # calendar days (crypto trades 24/7)
+
+
+def select_top_mixed(stock_hits: list[dict], crypto_hits: list[dict],
+                     n: int = None) -> list[dict]:
+    """One combined digest of at most n candidates by score, with ≥1 stock
+    and ≥1 crypto guaranteed whenever both classes produced hits — the user
+    wants a short list that still always shows both markets."""
+    n = n or MOM_DIGEST_TOP_N
+    merged = sorted(stock_hits + crypto_hits, key=lambda r: r["score"], reverse=True)
+    top = merged[:n]
+    for cls, pool in (("stock", stock_hits), ("crypto", crypto_hits)):
+        if pool and not any(r["asset_type"] == cls for r in top):
+            # swap the weakest pick for the strongest candidate of the missing class
+            top[-1] = pool[0]
+            top.sort(key=lambda r: r["score"], reverse=True)
+    return top
 
 
 def _score(price_change_pct: float, volume_usd: float) -> float:
