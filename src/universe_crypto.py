@@ -2,6 +2,7 @@
 import logging
 import sys
 import os
+import time
 
 import requests
 
@@ -9,6 +10,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import OKX_BASE_URL
 
 _log = logging.getLogger(__name__)
+
+_cache = {"at": 0.0, "symbols": []}
+_CACHE_TTL = 1800  # 30min — the news scanner hits this every few minutes
 
 # Stablecoins / commodity-backed tokens as the BASE asset — momentum on
 # these is meaningless (they're designed to not move) and they showed up
@@ -21,7 +25,11 @@ _NON_MOMENTUM_BASES = {
 
 def get_crypto_universe(quote_currencies=("USDT", "USDC")) -> list[str]:
     """Live OKX EU SPOT instrument IDs, e.g. 'BTC-USDT'. Filtered to major
-    stablecoin quote pairs so screener math (price/volume in USD) is simple."""
+    stablecoin quote pairs so screener math (price/volume in USD) is simple.
+    In-process cached (30min TTL)."""
+    now = time.time()
+    if now - _cache["at"] < _CACHE_TTL and _cache["symbols"]:
+        return _cache["symbols"]
     try:
         resp = requests.get(
             f"{OKX_BASE_URL}/api/v5/public/instruments",
@@ -42,7 +50,10 @@ def get_crypto_universe(quote_currencies=("USDT", "USDC")) -> list[str]:
         quote = x.get("quoteCcy", "")
         if quote in quote_currencies:
             out.append(inst_id)
-    return sorted(set(out))
+    if out:
+        _cache["symbols"] = sorted(set(out))
+        _cache["at"] = now
+    return _cache["symbols"]
 
 
 def get_top_crypto_by_volume(n: int, quote_currencies=("USDT", "USDC")) -> list[str]:

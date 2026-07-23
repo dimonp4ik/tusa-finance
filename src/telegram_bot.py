@@ -24,8 +24,8 @@ API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 _USER_KB = {
     "keyboard": [
         [{"text": "💰 Дивиденды"}, {"text": "🚀 Моментум"}],
-        [{"text": "🔥 Аномальный объём"}, {"text": "🕐 Рынок США"}],
-        [{"text": "❓ Помощь"}],
+        [{"text": "🔥 Аномальный объём"}, {"text": "📰 Новости"}],
+        [{"text": "🕐 Рынок США"}, {"text": "❓ Помощь"}],
     ],
     "resize_keyboard": True,
     "is_persistent": True,
@@ -41,8 +41,10 @@ _HELP_TEXT = (
     "💰 Дивиденды — последний найденный список дивидендных акций\n"
     "🚀 Моментум — акции + крипта с сильным ростом за 4 недели\n"
     "🔥 Аномальный объём — движение началось сегодня\n"
+    "📰 Новости — свежие катализаторы из новостей (до движения цены)\n"
     "🕐 Рынок США — открыт/закрыт сейчас\n\n"
-    "Дивиденды сканятся раз в сутки, моментум/объём — каждые несколько часов. "
+    "Дивиденды сканятся раз в неделю, моментум/объём — каждые несколько часов, "
+    "новости — каждые несколько минут. "
     "Бот только шлёт сигналы, покупки делаешь сам (акции — Trading212, крипта — OKX EU)."
 )
 
@@ -121,6 +123,19 @@ def _handle_unusual_volume(chat_id: int) -> None:
     _send(chat_id, "🔥 <b>АНОМАЛЬНЫЙ ОБЪЁМ (последний скан)</b>\n\n" + "\n\n".join(blocks))
 
 
+def _handle_news(chat_id: int) -> None:
+    from src import news_scanner
+    if not news_scanner.is_enabled():
+        _send(chat_id, "📭 Новостной сканер выключен (нет GROQ_API_KEY).")
+        return
+    rows = db.get_latest_news_candidates()
+    if not rows:
+        _send(chat_id, "📭 Пока нет свежих катализаторов.")
+        return
+    blocks = [telegram_notifier.format_news_candidate(r) for r in rows]
+    _send(chat_id, "📰 <b>НОВОСТНЫЕ КАТАЛИЗАТОРЫ (последние)</b>\n\n" + "\n\n".join(blocks))
+
+
 def _handle_market_status(chat_id: int) -> None:
     _send(chat_id, market_hours.status_text())
 
@@ -151,7 +166,8 @@ def _panel_status_text() -> str:
         "📊 <b>Статус сканов</b>\n\n"
         f"💰 Дивиденды: {s['dividend']['count']} канд. — {_fmt_ago(s['dividend']['last_at'])}\n"
         f"🚀 Моментум: {s['momentum']['count']} канд. — {_fmt_ago(s['momentum']['last_at'])}\n"
-        f"🔥 Аномальный объём: {s['unusual_volume']['count']} канд. — {_fmt_ago(s['unusual_volume']['last_at'])}"
+        f"🔥 Аномальный объём: {s['unusual_volume']['count']} канд. — {_fmt_ago(s['unusual_volume']['last_at'])}\n"
+        f"📰 Новости: {s['news']['count']} канд. — {_fmt_ago(s['news']['last_at'])}"
     )
 
 
@@ -182,7 +198,8 @@ def _panel_admins_text_kb(user_id: int) -> tuple:
 _SCANS_KB = {"inline_keyboard": [
     [{"text": "💰 Скан дивидендов", "callback_data": "af_scan_div"}],
     [{"text": "🚀 Скан моментума", "callback_data": "af_scan_mom"}],
-    [{"text": "🔁 Оба скана", "callback_data": "af_scan_all"}],
+    [{"text": "📰 Скан новостей", "callback_data": "af_scan_news"}],
+    [{"text": "🔁 Все сканы", "callback_data": "af_scan_all"}],
     _BACK_ROW,
 ]}
 
@@ -209,16 +226,18 @@ def _handle_callback(update: dict) -> None:
     elif data == "af_scans":
         _edit(chat_id, message_id, "🔄 <b>Ручной запуск скана</b>\nЗаймёт несколько минут.", _SCANS_KB)
 
-    elif data in ("af_scan_div", "af_scan_mom", "af_scan_all"):
+    elif data in ("af_scan_div", "af_scan_mom", "af_scan_news", "af_scan_all"):
         _edit(chat_id, message_id, "🔄 Запускаю...", {"inline_keyboard": [_BACK_ROW]})
         _send(chat_id, "🔄 Скан запущен, пришлю результат отдельным сообщением.")
 
         def _run():
-            from main import run_dividend_scan, run_momentum_scan
+            from main import run_dividend_scan, run_momentum_scan, run_news_scan
             if data in ("af_scan_div", "af_scan_all"):
                 run_dividend_scan()
             if data in ("af_scan_mom", "af_scan_all"):
                 run_momentum_scan()
+            if data in ("af_scan_news", "af_scan_all"):
+                run_news_scan()
 
         threading.Thread(target=_run, daemon=True).start()
 
@@ -282,6 +301,8 @@ def _handle_message(msg: dict) -> None:
         _handle_momentum(chat_id)
     elif text == "🔥 Аномальный объём":
         _handle_unusual_volume(chat_id)
+    elif text == "📰 Новости":
+        _handle_news(chat_id)
     elif text == "🕐 Рынок США":
         _handle_market_status(chat_id)
     elif text == "❓ Помощь":

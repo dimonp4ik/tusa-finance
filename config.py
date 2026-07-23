@@ -22,16 +22,34 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 DB_PATH = os.getenv("DB_PATH", "tusa_finance.db")
 
 # ── Scan cadence ─────────────────────────────────────────────────────────────
-# Dividend fundamentals don't change intraday — daily is plenty, and .info is
-# a slow one-request-per-symbol call (see DIV_SCAN_BATCH_PER_DAY) so there's
-# no upside to running it more often.
-SCAN_HOUR_UTC = int(os.getenv("SCAN_HOUR_UTC", "7"))          # once/day
-DIGEST_HOUR_UTC = int(os.getenv("DIGEST_HOUR_UTC", "18"))     # evening recap
+# Dividend fundamentals move on a quarterly cadence at best — weekly is
+# already generous, daily was noise (user: too frequent for data that barely
+# changes). Once a week, Sunday evening — before the US week opens, time to
+# read it and decide.
+DIV_SCAN_DAY_OF_WEEK = os.getenv("DIV_SCAN_DAY_OF_WEEK", "sun")  # apscheduler day name
+SCAN_HOUR_UTC = int(os.getenv("SCAN_HOUR_UTC", "19"))            # evening
+DIGEST_HOUR_UTC = int(os.getenv("DIGEST_HOUR_UTC", "18"))        # evening recap
 # Momentum + unusual-volume DO benefit from freshness (unusual-volume exists
 # specifically to catch a move the same day it starts) — these rescan every
 # N hours instead of once/day. Bulk OHLCV pull only (no .info), so the extra
 # runs are cheap-ish; still free/unofficial yfinance, so not sub-hourly.
 MOMENTUM_SCAN_INTERVAL_HOURS = int(os.getenv("MOMENTUM_SCAN_INTERVAL_HOURS", "4"))
+# News-catalyst scan — see src/news_scanner.py. This is the one screener that
+# genuinely benefits from running often: a catalyst headline can be the
+# FIRST signal, before price/volume have caught up (unlike momentum/unusual-
+# volume, which only see a move after it's already started). Free RSS + free
+# Groq tier, so frequent polling is cheap — just don't go sub-minute.
+NEWS_SCAN_INTERVAL_MINUTES = int(os.getenv("NEWS_SCAN_INTERVAL_MINUTES", "5"))
+# Overlap the lookback past the scan interval so a slow RSS feed / a scan
+# that ran a bit late never drops a headline in the gap; headline-hash dedup
+# (db.was_headline_seen) prevents re-processing the same one twice.
+NEWS_LOOKBACK_MINUTES = int(os.getenv("NEWS_LOOKBACK_MINUTES", "20"))
+# Don't re-alert the SAME symbol again within this window even if a second
+# headline about it shows up — avoids a burst of 5 alerts for one story
+# getting re-reported by 5 outlets. Short on purpose (news kind ≠ momentum
+# kind's 7-day cooldown): a genuinely new catalyst a few hours later should
+# still get through.
+NEWS_SYMBOL_COOLDOWN_HOURS = float(os.getenv("NEWS_SYMBOL_COOLDOWN_HOURS", "3"))
 
 # ── Universe sources (all free, no API key) ─────────────────────────────────
 # NASDAQ Trader symbol directory — official, free, no auth. Covers the full
@@ -49,10 +67,11 @@ DIV_MIN_MARKET_CAP_USD = float(os.getenv("DIV_MIN_MARKET_CAP_USD", "500000000"))
 DIV_MIN_YEARS_HISTORY = int(os.getenv("DIV_MIN_YEARS_HISTORY", "5"))
 DIV_TOP_N = int(os.getenv("DIV_TOP_N", "5"))          # candidates sent per digest
 # Fundamentals (.info) is a slow, one-request-per-symbol call — the full
-# US universe is ~8000 tickers. Instead of hammering yfinance daily, scan a
-# rotating slice per day (bot_state remembers the offset) so the whole
-# universe gets covered over ~2-3 weeks without risking an IP ban.
-DIV_SCAN_BATCH_PER_DAY = int(os.getenv("DIV_SCAN_BATCH_PER_DAY", "400"))
+# US universe is ~12000 tickers. Instead of hammering yfinance in one giant
+# burst, scan a rotating slice each weekly run (bot_state remembers the
+# offset) so the whole universe cycles over ~3 months without risking an IP
+# ban from firing thousands of .info calls in one sitting.
+DIV_SCAN_BATCH_PER_DAY = int(os.getenv("DIV_SCAN_BATCH_PER_DAY", "1000"))
 
 # ── Momentum ("x") screener thresholds ──────────────────────────────────────
 MOM_LOOKBACK_WEEKS = int(os.getenv("MOM_LOOKBACK_WEEKS", "4"))
@@ -128,6 +147,20 @@ JUDGE_MODEL = os.getenv("JUDGE_MODEL", "claude-haiku-4-5")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+# Only BUY-verdict candidates get sent — a SKIP verdict is the judge saying
+# "don't act on this", showing it anyway is noise (user: don't want to see
+# rejected setups). SKIP'd candidates stay in the DB (screener history) and
+# are NOT marked sent, so they can resurface later if conditions change.
+HIDE_JUDGE_SKIPPED = os.getenv("HIDE_JUDGE_SKIPPED", "1") != "0"
+
+# ── News-catalyst scanner (free RSS + free Groq tier) ───────────────────────
+# Groq (console.groq.com, free tier ~14400 req/day) scores whether a matched
+# headline is an actual tradeable catalyst, not just an incidental mention —
+# same role Groq already plays in the crypto/stocks bots' news_agent.py.
+# No key → matched headlines are still logged but never sent (no sentiment
+# gate = too noisy to trust blindly).
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # ── Rate limiting (keep yfinance/free sources from getting us IP-banned) ───
 YFINANCE_BATCH_SIZE = int(os.getenv("YFINANCE_BATCH_SIZE", "50"))

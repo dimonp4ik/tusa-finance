@@ -9,6 +9,7 @@ Trading212 offers (major US exchanges); Trading212 itself has no public
 import logging
 import sys
 import os
+import time
 
 import requests
 
@@ -16,6 +17,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import NASDAQ_LISTED_URL, OTHER_LISTED_URL
 
 _log = logging.getLogger(__name__)
+
+_cache = {"at": 0.0, "symbols": []}
+_CACHE_TTL = 3600  # NASDAQ listing barely changes intraday; the news scanner
+                    # hits this every few minutes, don't refetch every time.
 
 
 def _parse_pipe_file(text: str, symbol_col: str, test_col: str = "Test Issue") -> list[str]:
@@ -44,7 +49,12 @@ def _parse_pipe_file(text: str, symbol_col: str, test_col: str = "Test Issue") -
 
 
 def get_stock_universe() -> list[str]:
-    """All active, non-test US-listed common tickers. Cached by the caller if needed."""
+    """All active, non-test US-listed common tickers. In-process cached
+    (1h TTL) — called by both the 4h momentum scan and the 5min news scan."""
+    now = time.time()
+    if now - _cache["at"] < _CACHE_TTL and _cache["symbols"]:
+        return _cache["symbols"]
+
     symbols = set()
     try:
         resp = requests.get(NASDAQ_LISTED_URL, timeout=20)
@@ -58,4 +68,8 @@ def get_stock_universe() -> list[str]:
         symbols.update(_parse_pipe_file(resp.text, "ACT Symbol"))
     except Exception as e:
         _log.error("otherlisted.txt fetch failed: %s", e)
-    return sorted(symbols)
+
+    if symbols:
+        _cache["symbols"] = sorted(symbols)
+        _cache["at"] = now
+    return _cache["symbols"]

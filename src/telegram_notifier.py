@@ -108,6 +108,27 @@ def format_unusual_volume_candidate(row: dict) -> str:
     )
 
 
+def format_news_candidate(row: dict) -> str:
+    kind = "🪙" if row["asset_type"] == "crypto" else "📈"
+    return (
+        f"{kind} <b>{row['symbol']}</b> — {row.get('source') or ''}\n"
+        f"«{row['headline']}»\n"
+        f"💡 {row.get('reason', '')}"
+        f"{_insider_tag(row)}"
+    )
+
+
+def send_news_digest(rows: list[dict]) -> None:
+    if not rows:
+        return
+    blocks = [format_news_candidate(r) for r in rows]
+    send_message(
+        "📰 <b>НОВОСТНОЙ КАТАЛИЗАТОР</b>\n"
+        "⚠️ Экспериментально — заголовок ловится раньше движения цены, не после\n\n"
+        + "\n\n".join(blocks)
+    )
+
+
 def send_digest(dividend_rows: list[dict], momentum_rows: list[dict],
                  unusual_volume_rows: list[dict] = None,
                  context_lines: list[str] = None) -> None:

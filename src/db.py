@@ -73,6 +73,25 @@ def init_db():
             )
         """)
         c.execute("""
+            CREATE TABLE IF NOT EXISTS news_candidates (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol       TEXT NOT NULL,
+                asset_type   TEXT NOT NULL,
+                headline     TEXT NOT NULL,
+                source       TEXT,
+                reason       TEXT,
+                headline_hash TEXT NOT NULL,
+                scanned_at   REAL NOT NULL
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS news_seen (
+                headline_hash TEXT PRIMARY KEY,
+                symbol        TEXT,
+                seen_at       REAL NOT NULL
+            )
+        """)
+        c.execute("""
             CREATE TABLE IF NOT EXISTS admins (
                 user_id    INTEGER PRIMARY KEY,
                 username   TEXT,
@@ -157,12 +176,60 @@ def get_latest_unusual_volume_candidates(limit: int = 10) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def save_news_candidates(rows: list[dict]) -> None:
+    now = time.time()
+    with _conn() as c:
+        c.executemany("""
+            INSERT INTO news_candidates
+                (symbol, asset_type, headline, source, reason, headline_hash, scanned_at)
+            VALUES (:symbol, :asset_type, :headline, :source, :reason, :headline_hash, :scanned_at)
+        """, [{**r, "scanned_at": now} for r in rows])
+
+
+def get_latest_news_candidates(limit: int = 10) -> list[dict]:
+    """Most recent news-scan BATCH — unlike the other get_latest_* helpers,
+    news scans run every few minutes and often find nothing, so "the most
+    recent batch" would frequently be empty. Return the most recent `limit`
+    candidates across recent scans instead."""
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT * FROM news_candidates ORDER BY scanned_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def is_headline_seen(headline_hash: str) -> bool:
+    with _conn() as c:
+        return c.execute(
+            "SELECT 1 FROM news_seen WHERE headline_hash=?", (headline_hash,)
+        ).fetchone() is not None
+
+
+def mark_headline_seen(headline_hash: str, symbol: str) -> None:
+    with _conn() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO news_seen (headline_hash, symbol, seen_at) VALUES (?, ?, ?)",
+            (headline_hash, symbol, time.time()),
+        )
+
+
+def prune_old_headlines(older_than_days: int = 14) -> None:
+    """news_seen grows unbounded otherwise — headline hashes older than this
+    are never going to be re-fetched from RSS anyway (feeds don't go back
+    that far), safe to drop."""
+    cutoff = time.time() - older_than_days * 86400
+    with _conn() as c:
+        c.execute("DELETE FROM news_seen WHERE seen_at < ?", (cutoff,))
+
+
 def get_scan_summary() -> dict:
     """Last-scan timestamp + candidate count per screener — for the admin status view."""
     tables = {
         "dividend": "dividend_candidates",
         "momentum": "momentum_candidates",
         "unusual_volume": "unusual_volume_candidates",
+        "news": "news_candidates",
     }
     out = {}
     with _conn() as c:
