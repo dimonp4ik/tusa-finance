@@ -19,7 +19,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ── Storage ──────────────────────────────────────────────────────────────────
-DB_PATH = os.getenv("DB_PATH", "tusa_finance.db")
+DB_PATH = os.getenv("DB_PATH", "tusa_finance.db")  # Railway: set DB_PATH=/data/tusa_finance.db
 
 # ── Scan cadence ─────────────────────────────────────────────────────────────
 # Dividend fundamentals move on a quarterly cadence at best — weekly is
